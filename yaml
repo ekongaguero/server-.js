@@ -1,0 +1,13 @@
+services:
+    - type: web
+    name: server-js-euw6
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+            - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+            - key: PAYSTACK_SECRET_KEY
+        sync: false
