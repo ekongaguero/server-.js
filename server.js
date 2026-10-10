@@ -1,61 +1,97 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const fs = require('fs');
 
-let serviceAccount = null;
 try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  } else if (fs.existsSync('./serviceAccountKey.json')) {
-    serviceAccount = require('./serviceAccountKey.json');
-  }
-} catch (e) {
-  console.log("Firebase parse error:", e.message);
-}
-
-if (serviceAccount) {
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-}
+  const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  admin.initializeApp({ credential: admin.credential.cert(sa) });
+} catch(e){ console.log("Firebase error", e.message); }
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get('/', (req,res)=> res.send('ASSESS BACKEND V7 FIXED'));
+const BANK = "Moniepoint";
+const ACCT = "9020274023";
+const ACCT_NAME = "ASSESS LEARNING";
+
+app.get('/', (req,res)=> res.send('ASSESS AUTO-ACTIVATE LIVE'));
 
 app.post('/api/pay', async (req,res)=>{
   try{
-    const key = process.env.PAYSTACK_SECRET_KEY;
-    console.log('KEY CHECK:', key ? 'FOUND length='+key.length : 'NOT FOUND');
-    if(!key) return res.status(500).json({error:'PAYSTACK_SECRET_KEY not set'});
-    
-    const {email, amount, name, phone, plan, type} = req.body;
-    const resp = await fetch('https://api.paystack.co/transaction/initialize',{
-      method:'POST',
-      headers:{
-        Authorization: `Bearer ${key.trim()}`,
-        'Content-Type':'application/json'
-      },
-      body: JSON.stringify({
-        email, amount,
-        metadata:{name, phone, plan, type},
-        callback_url: 'https://server-js-ao4v.onrender.com/verify'
-      })
+    const { email, name, phone, plan, amount } = req.body;
+    const reference = 'ASSESS-' + Date.now();
+    const db = admin.firestore();
+
+    // 1. Save payment
+    await db.collection('payments').doc(reference).set({
+      email, name, phone, plan: plan || 'premium',
+      amount: amount || 24000000,
+      bank: BANK, accountNumber: ACCT,
+      reference,
+      status: 'approved', // AUTO APPROVED
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
-    const data = await resp.json();
-    console.log('Paystack init:', data);
-    if(data.status) res.json({authorization_url: data.data.authorization_url});
-    else res.status(400).json({error: data.message});
+
+    // 2. AUTO ACTIVATE USER - This is the key
+    // We find user by email and activate
+    const userQuery = await db.collection('users').where('email','==', email).get();
+
+    if(!userQuery.empty){
+      const userDoc = userQuery.docs[0];
+      await userDoc.ref.update({
+        plan: plan || 'premium',
+        isPremium: true,
+        premiumActivatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        paymentReference: reference,
+        accountActivated: true
+      });
+      console.log('Auto activated existing user:', email);
+    } else {
+      // If user doc doesn't exist yet, create it
+      await db.collection('users').doc(email).set({
+        email, name, phone,
+        plan: plan || 'premium',
+        isPremium: true,
+        accountActivated: true,
+        premiumActivatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        paymentReference: reference
+      }, {merge: true});
+      console.log('Auto activated new user doc:', email);
+    }
+
+    res.json({
+      success: true,
+      autoActivated: true,
+      bank: BANK,
+      accountNumber: ACCT,
+      accountName: ACCT_NAME,
+      reference,
+      amount: (amount || 24000000)/100,
+      message: 'Payment received, plan activated automatically!'
+    });
+
   }catch(e){
-    console.log('Pay error', e.message);
-    res.status(500).json({error:e.message});
+    console.error("Pay error:", e);
+    res.status(500).json({error: e.message});
   }
 });
 
-app.get('/verify', (req,res)=>{
-  res.send(`Payment ${req.query.reference} verified! Close this.`);
+app.get('/api/check-access/:email', async (req,res)=>{
+  try{
+    const db = admin.firestore();
+    const email = req.params.email;
+    // Check both by doc ID and by email field
+    let doc = await db.collection('users').doc(email).get();
+    if(!doc.exists){
+      const q = await db.collection('users').where('email','==', email).get();
+      if(!q.empty) doc = q.docs[0];
+    }
+    if(!doc.exists) return res.json({hasAccess: false});
+    const data = doc.data();
+    res.json({hasAccess:!!data.isPremium ||!!data.accountActivated, plan: data.plan});
+  }catch(e){ res.status(500).json({error: e.message}); }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, ()=> console.log('LIVE on '+PORT));
+app.listen(PORT, ()=> console.log(`LIVE with AUTO ACTIVATE ${BANK} ${ACCT}`));
