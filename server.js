@@ -13,7 +13,7 @@ app.use(express.json());
 
 const BANK = "Moniepoint";
 const ACCT = "9020274023";
-const ACCT_NAME = "ASSESS LEARNING";
+const ACCT_NAME = "ASSESS INTERNET";
 
 app.get('/', (req,res)=> res.send('ASSESS AUTO-ACTIVATE LIVE'));
 
