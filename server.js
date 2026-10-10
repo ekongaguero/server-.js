@@ -73,6 +73,4 @@ app.get('/verify', async (req,res)=>{
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, ()=> console.log('LIVE on '+PORT));
-git add .
-git commit -m "fix paystack key"
-git push
+
