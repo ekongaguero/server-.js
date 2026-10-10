@@ -5,45 +5,58 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-console.log("--- ENV CHECK ---");
-console.log("Keys found:", Object.keys(process.env).filter(k=>k.includes('FIREBASE')));
-let serviceAccount;
-try {
-  let raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if(!raw) throw new Error("FIREBASE_SERVICE_ACCOUNT is undefined - not set on Render");
-  
-  // Fix newlines
-  raw = raw.trim();
-  serviceAccount = JSON.parse(raw);
-  
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
+// Firebase
+try{
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+  const serviceAccount = JSON.parse(raw);
+  admin.initializeApp({credential: admin.credential.cert(serviceAccount)});
   console.log("Firebase connected ✅ Project:", serviceAccount.project_id);
-} catch(e) {
-  console.log("Firebase error", e.message);
-  console.log("FIX: Re-paste JSON as single line without line breaks");
-}
+}catch(e){ console.log("Firebase error", e.message); }
 
-app.get('/', (req,res)=> res.send('ASSESS AUTO-ACTIVATE LIVE - Moniepoint 9020274023 - ASSESS INTERNET'));
+const BANK = "Moniepoint";
+const ACCOUNT = "9020274023";
+const NAME = "ASSESS INTERNET";
 
-app.post('/api/payments/submit', async (req,res)=>{
-  const { reference, email, name, amount, planId } = req.body;
-  try {
-    if(admin.apps.length>0){
+app.get('/', (req,res)=> res.send(`ASSESS AUTO-ACTIVATE LIVE - ${BANK} ${ACCOUNT} - ${NAME}`));
+
+// Endpoint YOUR APP EXPECTS
+app.post('/api/pay', async (req,res)=>{
+  const { email, amount, name, phone, plan, type } = req.body;
+  const realAmountNaira = Math.round((amount||0)/100); // 1000 => 1000
+  const reference = "ASS-"+Date.now();
+  
+  try{
+    if(admin.apps.length){
       const db = admin.firestore();
       await db.collection('payments').doc(reference).set({
-        email, name, amount, planId, status:'approved', createdAt: new Date()
+        email: email.toLowerCase(), name, phone, plan, type,
+        amount: realAmountNaira, bank: BANK, accountNumber: ACCOUNT,
+        status: 'approved', autoActivated: true, createdAt: new Date()
       });
-      await db.collection('users').doc(email).set({
-        isPremium:true, planId, premiumUntil: new Date(Date.now()+30*24*60*60*1000)
+      await db.collection('users').doc(email.toLowerCase()).set({
+        isPremium: true, name, phone, plan, type, premiumUntil: new Date(Date.now()+30*24*60*60*1000)
       }, {merge:true});
     }
-    res.json({success:true, message:'Payment auto-approved Moniepoint 9020274023'});
-  } catch(err){
+    res.json({
+      success: true,
+      autoActivated: true,
+      bank: BANK,
+      accountNumber: ACCOUNT,
+      accountName: NAME,
+      amount: realAmountNaira,
+      reference
+    });
+  }catch(err){
     console.log(err);
-    res.json({success:true}); // emergency approve even if firebase fails
+    res.json({success:true, autoActivated:true, bank:BANK, accountNumber:ACCOUNT, amount:realAmountNaira, reference});
   }
 });
 
-app.listen(10000, ()=> console.log('LIVE AUTO Moniepoint 9020274023'));
+app.get('/api/users', async (req,res)=>{
+  if(!admin.apps.length) return res.send("Firebase not connected");
+  const snap = await admin.firestore().collection('users').get();
+  const users = snap.docs.map(d=>d.data());
+  res.json(users);
+});
+
+app.listen(10000, ()=> console.log(`LIVE AUTO ${BANK} ${ACCOUNT}`));
