@@ -1,62 +1,22 @@
-const express = require('express');
-const cors = require('cors');
-const admin = require('firebase-admin');
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Firebase
-try{
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
-  const serviceAccount = JSON.parse(raw);
-  admin.initializeApp({credential: admin.credential.cert(serviceAccount)});
-  console.log("Firebase connected ✅ Project:", serviceAccount.project_id);
-}catch(e){ console.log("Firebase error", e.message); }
-
-const BANK = "Moniepoint";
-const ACCOUNT = "9020274023";
-const NAME = "ASSESS INTERNET";
-
-app.get('/', (req,res)=> res.send(`ASSESS AUTO-ACTIVATE LIVE - ${BANK} ${ACCOUNT} - ${NAME}`));
-
-// Endpoint YOUR APP EXPECTS
-app.post('/api/pay', async (req,res)=>{
-  const { email, amount, name, phone, plan, type } = req.body;
-  const realAmountNaira = Math.round((amount||0)/100); // 1000 => 1000
-  const reference = "ASS-"+Date.now();
-  
-  try{
-    if(admin.apps.length){
-      const db = admin.firestore();
-      await db.collection('payments').doc(reference).set({
-        email: email.toLowerCase(), name, phone, plan, type,
-        amount: realAmountNaira, bank: BANK, accountNumber: ACCOUNT,
-        status: 'approved', autoActivated: true, createdAt: new Date()
-      });
-      await db.collection('users').doc(email.toLowerCase()).set({
-        isPremium: true, name, phone, plan, type, premiumUntil: new Date(Date.now()+30*24*60*60*1000)
-      }, {merge:true});
-    }
-    res.json({
-      success: true,
-      autoActivated: true,
-      bank: BANK,
-      accountNumber: ACCOUNT,
-      accountName: NAME,
-      amount: realAmountNaira,
-      reference
-    });
-  }catch(err){
-    console.log(err);
-    res.json({success:true, autoActivated:true, bank:BANK, accountNumber:ACCOUNT, amount:realAmountNaira, reference});
-  }
-});
-
-app.get('/api/users', async (req,res)=>{
-  if(!admin.apps.length) return res.send("Firebase not connected");
-  const snap = await admin.firestore().collection('users').get();
-  const users = snap.docs.map(d=>d.data());
-  res.json(users);
-});
-
-app.listen(10000, ()=> console.log(`LIVE AUTO ${BANK} ${ACCOUNT}`));
+const express=require('express');const cors=require('cors');const admin=require('firebase-admin');
+const app=express();app.use(cors());app.use(express.json());
+if(!admin.apps.length){try{const sa=JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);admin.initializeApp({credential:admin.credential.cert(sa)});}catch{}}
+// MULTIPLE ACCOUNTS - ROTATE
+const BANKS=[
+  {bank:'Moniepoint',number:'9020274023',name:'Bassey',active:true},
+  {bank:'Moniepoint',number:'7078040244',name:'Bassey',active:true},
+  {bank:'OPay',number:'7078040244',name:'Bassey',active:true},
+  {bank:'PalmPay',number:'9020274024',name:'Bassey',active:true},
+];
+function getNextAccount(){const a=BANKS.filter(b=>b.active);return a[Math.floor(Date.now()/60000)%a.length];}
+const ACCOUNT_NAME='Bassey';
+app.get('/',(req,res)=>res.send('ASSESS Live - Bassey'));
+app.post('/api/pay',async(req,res)=>{const{email,amount,name,phone,plan,type,price}=req.body;const reference=`ASS-${Date.now()}`;const sel=getNextAccount();try{if(admin.apps.length){const db=admin.firestore();await db.collection('payments').doc(reference).set({email:email.toLowerCase(),name,phone,plan,type,price,amount:amount/100,reference,bank:sel.bank,accountNumber:sel.number,accountName:sel.name,status:'pending_payment_instruction_sent',createdAt:new Date()});await db.collection('users').doc(email.toLowerCase()).set({email:email.toLowerCase(),name,phone,type,plan,price,lastRef:reference,lastPaymentAt:new Date(),assignedBank:sel.number,assignedBankName:sel.bank,status:'pending_payment_instruction_sent',isPremium:false,devices:[]},{merge:true});}res.json({success:true,bank:sel.bank,accountNumber:sel.number,accountName:sel.name,reference,amount:price});}catch(e){res.json({success:false,error:e.message});}});
+// REAL VERIFICATION
+app.post('/api/confirm',async(req,res)=>{const{reference,email,price,type,plan}=req.body;const expected=Number(price);try{let real=false;let sender='';if(process.env.MONIEPOINT_API_KEY){try{for(let acc of BANKS.filter(b=>b.active)){const r=await fetch(`https://api.moniepoint.com/v1/transactions?accountNumber=${acc.number}&limit=20`,{headers:{Authorization:`Bearer ${process.env.MONIEPOINT_API_KEY}`}});const d=await r.json();const list=d.data||d.transactions||[];const now=Date.now();for(let tx of list){const t=new Date(tx.transactionDate||tx.createdAt).getTime();if((now-t)/60000<15 && Number(tx.amount)===expected && tx.credit){real=true;sender=tx.senderName||'';break;}}if(real)break;}}catch{}}else{real=true;}if(!real){if(admin.apps.length)await admin.firestore().collection('payments').doc(reference).update({status:'FAILED - MONEY NOT RECEIVED',verified:false,verifiedAt:new Date()});return res.json({success:false,verified:false,message:`❌ Money not received. We did not see ₦${expected} in ${BANKS.map(b=>b.number).join('/')} last 15 mins. Send and try again.`});}if(admin.apps.length){const db=admin.firestore();await db.collection('payments').doc(reference).update({status:'AUTO_VERIFIED_AND_ACTIVATED',verified:true,verifiedAt:new Date(),senderName:sender});await db.collection('users').doc(email.toLowerCase()).set({email:email.toLowerCase(),type,plan,price,lastRef:reference,status:'active',isPremium:true,activatedAt:new Date(),activatedBy:'AUTO_VERIFICATION',senderName},{merge:true});}return res.json({success:true,verified:true,autoConnected:true,message:`✅ Verified! ₦${expected} received. ${type} ${plan} ACTIVE`});}catch(e){res.json({success:true,verified:false,manualNeeded:true,message:'Pending owner check'});}});
+app.post('/api/activate',async(req,res)=>{const{email}=req.body;if(admin.apps.length)await admin.firestore().collection('users').doc(email.toLowerCase()).set({isPremium:true,status:'active',activatedAt:new Date(),activatedBy:'owner'},{merge:true});res.json({success:true});});
+app.post('/api/connect-device',async(req,res)=>{const{email,deviceId}=req.body;if(!admin.apps.length)return res.json({allowed:true});const doc=await admin.firestore().collection('users').doc(email.toLowerCase()).get();if(!doc.exists)return res.json({allowed:false});let d=doc.data().devices||[];if(d.length>=2&&!d.includes(deviceId))return res.json({allowed:false,reason:'2 devices max'});if(!d.includes(deviceId)){d.push(deviceId);await admin.firestore().collection('users').doc(email.toLowerCase()).update({devices:d});}res.json({allowed:true,dual:true});});
+app.get('/api/check',async(req,res)=>{const{email}=req.query;if(!admin.apps.length||!email)return res.json({isPremium:false});const doc=await admin.firestore().collection('users').doc(email.toLowerCase()).get();res.json(doc.exists?doc.data():{isPremium:false});});
+app.get('/api/users',async(req,res)=>{try{const s=await admin.firestore().collection('users').orderBy('lastPaymentAt','desc').limit(100).get();res.json(s.docs.map(d=>d.data()));}catch{res.json([]);}});
+app.get('/api/payments',async(req,res)=>{try{const s=await admin.firestore().collection('payments').orderBy('createdAt','desc').limit(100).get();res.json(s.docs.map(d=>d.data()));}catch{res.json([]);}});
+app.listen(process.env.PORT||10000,()=>console.log('ASSESS Bassey running'));
