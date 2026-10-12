@@ -11,11 +11,7 @@ const BANKS = [
 ];
 
 let currentIndex = 0;
-function getBank() {
-  const bank = BANKS[currentIndex];
-  currentIndex = (currentIndex + 1) % BANKS.length;
-  return bank;
-}
+function getBank() { const bank = BANKS[currentIndex]; currentIndex = (currentIndex + 1) % BANKS.length; return bank; }
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
@@ -23,18 +19,10 @@ app.use(express.json());
 let users = [];
 let payments = [];
 
-app.get('/', (req, res) => {
-  res.json({ status: "ASSESS backend online", banks: BANKS, users: users.length, payments: payments.length });
-});
+app.get('/', (req, res) => { res.json({ status: "ASSESS backend online", banks: BANKS, users: users.length, payments: payments.length }); });
 app.get('/api/users', (req, res) => { res.json(users); });
 app.get('/api/payments', (req, res) => { res.json(payments); });
-
-// NEW: Check phone exists - for 1 phone 1 account rule
-app.get('/api/check-phone/:phone', (req, res) => {
-  const phone = req.params.phone.replace(/\s/g,'');
-  const exists = users.find(u => u.phone === phone);
-  res.json({ exists:!!exists, user: exists || null });
-});
+app.get('/api/check-phone/:phone', (req, res) => { const phone = req.params.phone.replace(/\s/g,''); const exists = users.find(u => u.phone === phone); res.json({ exists:!!exists, user: exists || null }); });
 
 app.post('/api/pay', (req, res) => {
   try {
@@ -44,37 +32,12 @@ app.post('/api/pay', (req, res) => {
     const reference = `ASSESS-${Date.now()}-${Math.floor(Math.random()*1000)}`;
     const lowerEmail = email.trim().toLowerCase();
     const bankInfo = getBank();
-
-    // 1 PHONE 1 ACCOUNT + REFERRAL LOCK AFTER FIRST SIGNUP
     let existingUser = users.find(u => u.phone === cleanPhone);
     let finalReferral = "";
-    if(!existingUser){
-      finalReferral = (referralCode || "").trim();
-      if(finalReferral === cleanPhone) finalReferral = ""; // No self-referral
-    } else {
-      finalReferral = existingUser.referralCode || ""; // Keep original, can't be referred again
-    }
-
-    const payment = {
-      email: lowerEmail, name: name || "Customer", phone: cleanPhone, referralCode: finalReferral, plan: plan || "", type: type || "BASIC", price: price || 0,
-      reference, bank: bankInfo.bank, accountNumber: bankInfo.accountNumber, assignedBank: bankInfo.accountNumber, assignedBankName: bankInfo.bank, bankFull: bankInfo.full, holderName: bankInfo.name,
-      status: "pending", verified: false, date: new Date().toISOString()
-    };
+    if(!existingUser){ finalReferral = (referralCode || "").trim(); if(finalReferral === cleanPhone) finalReferral = ""; } else { finalReferral = existingUser.referralCode || ""; }
+    const payment = { email: lowerEmail, name: name || "Customer", phone: cleanPhone, referralCode: finalReferral, plan: plan || "", type: type || "BASIC", price: price || 0, reference, bank: bankInfo.bank, accountNumber: bankInfo.accountNumber, assignedBank: bankInfo.accountNumber, assignedBankName: bankInfo.bank, bankFull: bankInfo.full, holderName: bankInfo.name, status: "pending", verified: false, date: new Date().toISOString() };
     payments.push(payment);
-
-    if (!existingUser) {
-      const newUser = {
-        email: lowerEmail, name: name || "", phone: cleanPhone,
-        referralCode: finalReferral, myCode: cleanPhone, referrals: 0, freeDays: 0,
-        type: type || "BASIC", plan: plan || "", price: price || 0, isPremium: false, devices: [], lastRef: reference, assignedBank: bankInfo.accountNumber, assignedBankName: bankInfo.bank, status: "pending",
-        firstSignup: new Date().toISOString()
-      };
-      users.push(newUser);
-    } else {
-      existingUser.lastRef = reference; existingUser.type = type || existingUser.type; existingUser.plan = plan || existingUser.plan; existingUser.price = price || existingUser.price;
-      // Don't overwrite referralCode - referral removed after first signup
-      existingUser.assignedBank = bankInfo.accountNumber; existingUser.assignedBankName = bankInfo.bank;
-    }
+    if (!existingUser) { const newUser = { email: lowerEmail, name: name || "", phone: cleanPhone, referralCode: finalReferral, myCode: cleanPhone, referrals: 0, freeDays: 0, type: type || "BASIC", plan: plan || "", price: price || 0, isPremium: false, devices: [], lastRef: reference, assignedBank: bankInfo.accountNumber, assignedBankName: bankInfo.bank, status: "pending", firstSignup: new Date().toISOString() }; users.push(newUser); } else { existingUser.lastRef = reference; existingUser.type = type || existingUser.type; existingUser.plan = plan || existingUser.plan; existingUser.price = price || existingUser.price; existingUser.assignedBank = bankInfo.accountNumber; existingUser.assignedBankName = bankInfo.bank; }
     return res.json({ success: true, bank: bankInfo.bank, accountNumber: bankInfo.accountNumber, name: bankInfo.name, full: bankInfo.full, reference, isNewUser:!existingUser });
   } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
 });
@@ -84,41 +47,13 @@ app.post('/api/confirm', (req, res) => {
   const lowerEmail = (email || "").trim().toLowerCase();
   const payment = payments.find(p => p.reference === reference || p.email === lowerEmail);
   if (!payment) { return res.json({ verified: false, autoConnected: false, message: "No payment found." }); }
-
-  if(!payment.verified){
-    payment.verified = true;
-    payment.status = "confirmed";
-
-    // RULE: 1 FREE DAY ONLY IF WEEKLY+ (₦6000+)
-    if(payment.referralCode && payment.price >= 6000){
-      const referrer = users.find(u => u.phone === payment.referralCode);
-      if(referrer && referrer.phone!== payment.phone){
-        referrer.referrals = (referrer.referrals || 0) + 1;
-        referrer.freeDays = (referrer.freeDays || 0) + 1;
-        console.log(`REF BONUS: ${referrer.phone} +1 day from ${payment.phone} - ₦${payment.price}`);
-      }
-    }
-  }
-
-  let user = users.find(u => u.email === lowerEmail);
-  if (user) { user.isPremium = true; user.status = "active"; user.type = type || user.type; user.plan = plan || user.plan; }
-  return res.json({ verified: true, autoConnected: true, message: `✅ Confirmed! ₦${payment.price} received at ${payment.bank} ${payment.accountNumber}. ${payment.referralCode && payment.price >= 6000? 'Referrer gets +1 FREE DAY!' : payment.referralCode? 'No bonus - needs Weekly+ (₦6k+)' : ''} Access activated.` });
+  if(!payment.verified){ payment.verified = true; payment.status = "confirmed"; if(payment.referralCode && payment.price >= 6000){ const referrer = users.find(u => u.phone === payment.referralCode); if(referrer && referrer.phone!== payment.phone){ referrer.referrals = (referrer.referrals || 0) + 1; referrer.freeDays = (referrer.freeDays || 0) + 1; } } }
+  let user = users.find(u => u.email === lowerEmail); if (user) { user.isPremium = true; user.status = "active"; user.type = type || user.type; user.plan = plan || user.plan; }
+  return res.json({ verified: true, autoConnected: true, message: `✅ Confirmed! ₦${payment.price} received at ${payment.bank} ${payment.accountNumber}. Access activated.` });
 });
 
 app.post('/api/activate', (req, res) => {
-  const { email } = req.body;
-  const lowerEmail = email.trim().toLowerCase();
-  const user = users.find(u => u.email === lowerEmail);
-  if (user) { user.isPremium = true; user.status = "active"; }
-  const pay = payments.find(p => p.email === lowerEmail &&!p.verified);
-  if (pay) {
-    pay.verified = true; pay.status = "confirmed";
-    if(pay.referralCode && pay.price >= 6000){
-      const referrer = users.find(u => u.phone === pay.referralCode);
-      if(referrer && referrer.phone!== pay.phone){ referrer.referrals = (referrer.referrals||0)+1; referrer.freeDays = (referrer.freeDays||0)+1; }
-    }
-  }
-  return res.json({ success: true, email: lowerEmail, activated: true });
+  const { email } = req.body; const lowerEmail = email.trim().toLowerCase(); const user = users.find(u => u.email === lowerEmail); if (user) { user.isPremium = true; user.status = "active"; } const pay = payments.find(p => p.email === lowerEmail &&!p.verified); if (pay) { pay.verified = true; pay.status = "confirmed"; if(pay.referralCode && pay.price >= 6000){ const referrer = users.find(u => u.phone === pay.referralCode); if(referrer && referrer.phone!== pay.phone){ referrer.referrals = (referrer.referrals||0)+1; referrer.freeDays = (referrer.freeDays||0)+1; } } } return res.json({ success: true, email: lowerEmail, activated: true });
 });
 
 app.listen(PORT, () => { console.log(`ASSESS running`); });
