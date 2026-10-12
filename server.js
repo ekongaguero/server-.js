@@ -3,12 +3,11 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// ================= 4 ACCOUNTS ROTATING =================
 const BANKS = [
-  { bank: "PalmPay", accountNumber: "9020274023", name: "Bassey", full: "PalmPay" },
-  { bank: "OPay", accountNumber: "7078040244", name: "Bassey", full: "OPay Digital Services" },
-  { bank: "Moniepoint", accountNumber: "7078040244", name: "Bassey", full: "Moniepoint Microfinance Bank" },
-  { bank: "Moniepoint", accountNumber: "9020274023", name: "Bassey", full: "Moniepoint Microfinance Bank" }
+  { bank: "PalmPay", accountNumber: "9020274023", name: "ASSESS INTERNET(BASSEY)", full: "PalmPay" },
+  { bank: "OPay", accountNumber: "7078040244", name: "ASSESS INTERNET(BASSEY)", full: "OPay Digital Services" },
+  { bank: "Moniepoint", accountNumber: "7078040244", name: "ASSESS INTERNET(BASSEY)", full: "Moniepoint Microfinance Bank" },
+  { bank: "Moniepoint", accountNumber: "9020274023", name: "ASSESS INTERNET(BASSEY)", full: "Moniepoint Microfinance Bank" }
 ];
 
 let currentIndex = 0;
@@ -17,7 +16,6 @@ function getBank() {
   currentIndex = (currentIndex + 1) % BANKS.length;
   return bank;
 }
-// =======================================================
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
@@ -28,7 +26,6 @@ let payments = [];
 app.get('/', (req, res) => {
   res.json({ status: "ASSESS backend online", banks: BANKS, users: users.length, payments: payments.length });
 });
-
 app.get('/api/users', (req, res) => { res.json(users); });
 app.get('/api/payments', (req, res) => { res.json(payments); });
 
@@ -52,13 +49,12 @@ app.post('/api/pay', (req, res) => {
     } else {
       user.lastRef = reference; user.type = type || user.type; user.plan = plan || user.plan; user.price = price || user.price; user.assignedBank = bankInfo.accountNumber; user.assignedBankName = bankInfo.bank;
     }
-    console.log(`PAY: ${lowerEmail} -> ${bankInfo.bank} ${bankInfo.accountNumber} ₦${price} Ref:${reference}`);
     return res.json({ success: true, bank: bankInfo.bank, accountNumber: bankInfo.accountNumber, name: bankInfo.name, full: bankInfo.full, reference, message: `Send ₦${price} to ${bankInfo.accountNumber} (${bankInfo.bank}) - ${bankInfo.name}` });
   } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.post('/api/confirm', (req, res) => {
-  const { reference, email, type, plan, price } = req.body;
+  const { reference, email, type, plan } = req.body;
   const lowerEmail = (email || "").trim().toLowerCase();
   const payment = payments.find(p => p.reference === reference || p.email === lowerEmail);
   if (!payment) { return res.json({ verified: false, autoConnected: false, message: "No payment found." }); }
@@ -70,7 +66,6 @@ app.post('/api/confirm', (req, res) => {
 
 app.post('/api/activate', (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: "Email required" });
   const lowerEmail = email.trim().toLowerCase();
   const user = users.find(u => u.email === lowerEmail);
   if (user) { user.isPremium = true; user.status = "active"; }
@@ -79,4 +74,4 @@ app.post('/api/activate', (req, res) => {
   return res.json({ success: true, email: lowerEmail, activated: true });
 });
 
-app.listen(PORT, () => { console.log(`ASSESS running on ${PORT}`); console.log(BANKS); });
+app.listen(PORT, () => { console.log(`ASSESS running`); });
